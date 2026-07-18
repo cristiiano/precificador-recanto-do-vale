@@ -1,4 +1,4 @@
-# app.py - Precificador de Imóveis - Recanto do Vale / Vargas
+# app.py - Precificador de Imóveis - Sapucaia do Sul
 # Imobiliárias: Besser, Corretor e Cia, Sauthier, Imobiliária Sapucaia, Andi Imóveis
 
 from flask import Flask, request, jsonify
@@ -13,7 +13,6 @@ class PrecificadorRecantoDoVale:
     def __init__(self):
         self.imoveis_encontrados = []
         
-        # IMOBILIÁRIAS CADASTRADAS
         self.imobiliarias = {
             'besser': {
                 'nome': 'Besser Negócios Imobiliários',
@@ -45,217 +44,215 @@ class PrecificadorRecantoDoVale:
             },
             'andi': {
                 'nome': 'Andi Imóveis',
-                'url': 'https://andiimoveis.com.br/comprar/rs/sapucaia-do-sul/vargas/casa/ordem-valor/resultado/pagina-1/',
                 'url_base': 'https://andiimoveis.com.br',
-                'telefone': 'Ver no site',
+                'url_busca': '/comprar/rs/sapucaia-do-sul/vargas/casa/ordem-valor/resultado/pagina-{pagina}/',
+                'telefone': '(51) 99638-2628',
                 'cor': '#E91E63',
-                'paginacao': True,
-                'url_pagina': 'https://andiimoveis.com.br/comprar/rs/sapucaia-do-sul/vargas/casa/ordem-valor/resultado/pagina-{pagina}/',
-                'max_paginas': 5
+                'max_paginas': 3
             }
         }
     
-    def buscar_site(self, config, tipo=None, preco_min=0, preco_max=999999999, area_min=0, area_max=999999):
-        """Busca imóveis em um site específico"""
+    def buscar_andi(self, config, tipo=None, preco_min=0, preco_max=999999999, area_min=0, area_max=999999):
+        """Busca específica para Andi Imóveis"""
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'pt-BR,pt;q=0.9',
         }
         
         todos_imoveis = []
-        urls_para_buscar = [config['url']]
         
-        # Se tem paginação, adicionar mais páginas
-        if config.get('paginacao'):
-            for pagina in range(2, config.get('max_paginas', 5) + 1):
-                urls_para_buscar.append(config['url_pagina'].format(pagina=pagina))
-        
-        for url in urls_para_buscar:
+        for pagina in range(1, config['max_paginas'] + 1):
+            url = config['url_base'] + config['url_busca'].format(pagina=pagina)
+            
             try:
-                print(f"🔍 Acessando: {config['nome']} - {url}")
+                print(f"🔍 Andi - Página {pagina}: {url}")
                 response = requests.get(url, headers=headers, timeout=20)
                 
                 if response.status_code != 200:
                     print(f"   ❌ HTTP {response.status_code}")
-                    if url != config['url']:
-                        break  # Para paginação se der erro
-                    continue
+                    break
                 
                 soup = BeautifulSoup(response.content, 'html.parser')
                 
-                # Buscar links de imóveis (padrão adaptado para Andi)
-                links = soup.find_all('a', href=re.compile(r'/imovel|/Imovel|/imoveis|/comprar|/detalhes|/property', re.I))
+                # PADRÃO CORRETO: Links com /comprar/rs/sapucaia-do-sul/vargas/casa/XXXXXXXX
+                links = soup.find_all('a', href=re.compile(r'/comprar/rs/sapucaia-do-sul/vargas/casa/\d+'))
                 
-                # Buscar cards
-                cards = soup.find_all(['div', 'article', 'li', 'section'], 
-                                     class_=re.compile(r'card|imovel|property|listing|item|box|result|anuncio|post', re.I))
+                print(f"   🔗 Links de casas: {len(links)}")
                 
-                # Buscar preços e áreas no texto
-                texto_completo = soup.get_text()
-                precos_texto = re.findall(r'R\$\s*[\d.,]+', texto_completo)
-                areas_texto = re.findall(r'(\d+[\.,]?\d*)\s*m²', texto_completo)
-                
-                print(f"   Links: {len(links)} | Cards: {len(cards)} | Preços: {len(precos_texto)} | Áreas: {len(areas_texto)}")
+                if not links:
+                    break
                 
                 imoveis_pagina = []
                 
-                # Processar links encontrados
-                if links:
-                    for link in links:
-                        try:
-                            href = link.get('href', '')
-                            texto = link.get_text(strip=True)
-                            
-                            if len(texto) < 10:
-                                for parent_tag in ['div', 'article', 'li', 'section']:
-                                    pai = link.find_parent(parent_tag)
-                                    if pai:
-                                        texto = pai.get_text(strip=True)
-                                        if len(texto) > 20:
-                                            break
-                            
-                            tipo_imovel = 'Terreno' if 'terreno' in href.lower() + texto.lower() else 'Casa'
-                            
-                            if tipo and tipo.lower() not in tipo_imovel.lower():
-                                continue
-                            
-                            area = 0
-                            area_match = re.search(r'(\d+[\.,]?\d*)\s*m²', texto)
-                            if area_match:
-                                area = float(area_match.group(1).replace(',', '.'))
-                            
-                            preco = 0
-                            preco_match = re.search(r'R\$\s*([\d.]+(?:,\d{2})?)', texto)
-                            if preco_match:
-                                preco_str = preco_match.group(1).replace('.', '').replace(',', '.')
-                                preco = float(preco_str)
-                            
-                            if 'aluguel' in texto.lower() and 'venda' not in texto.lower():
-                                continue
-                            
-                            if preco > 0 and (preco < preco_min or preco > preco_max):
-                                continue
-                            if area > 0 and (area < area_min or area > area_max):
-                                continue
-                            
-                            link_completo = config['url_base'] + href if href.startswith('/') else href
-                            if not link_completo.startswith('http'):
-                                link_completo = url
-                            
-                            preco_m2 = round(preco / area, 2) if preco > 0 and area > 0 else 0
-                            
-                            imoveis_pagina.append({
-                                'codigo': '',
-                                'titulo': texto[:150] or f'{tipo_imovel} - {config["nome"]}',
-                                'tipo': tipo_imovel,
-                                'preco': preco,
-                                'area': area,
-                                'preco_m2': preco_m2,
-                                'quartos': 0,
-                                'banheiros': 0,
-                                'vagas': 0,
-                                'link': link_completo,
-                                'imobiliaria': config['nome'],
-                                'telefone': config['telefone'],
-                                'cor': config['cor']
-                            })
-                        except:
+                for link in links:
+                    try:
+                        href = link['href']
+                        texto_completo = link.get_text(strip=True)
+                        
+                        # Se o link tem pouco texto, pegar do elemento pai
+                        if len(texto_completo) < 20:
+                            pai = link.find_parent(['div', 'article', 'li'])
+                            if pai:
+                                texto_completo = pai.get_text(strip=True)
+                        
+                        # Extrair área (padrão: XX,XXm²)
+                        area = 0
+                        area_match = re.search(r'(\d+,\d{2})\s*m²', texto_completo)
+                        if area_match:
+                            area = float(area_match.group(1).replace(',', '.'))
+                        
+                        # Extrair preço (padrão: R$ XXX.XXX,XX - pegar apenas o valor limpo)
+                        preco = 0
+                        # Buscar por R$ seguido de números
+                        preco_match = re.search(r'R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2}))', texto_completo)
+                        if preco_match:
+                            preco_str = preco_match.group(1)
+                            # Limpar: remover pontos de milhar, trocar vírgula por ponto
+                            preco_str = preco_str.replace('.', '').replace(',', '.')
+                            preco = float(preco_str)
+                        
+                        # Extrair dormitórios
+                        quartos = 0
+                        q_match = re.search(r'(\d+)\s*dormitórios?', texto_completo)
+                        if q_match:
+                            quartos = int(q_match.group(1))
+                        
+                        # Extrair vagas
+                        vagas = 0
+                        v_match = re.search(r'(\d+)\s*vagas?', texto_completo)
+                        if v_match:
+                            vagas = int(v_match.group(1))
+                        
+                        # Tipo (casa ou terreno)
+                        tipo_imovel = 'Terreno' if 'terreno' in texto_completo.lower() else 'Casa'
+                        
+                        if tipo and tipo.lower() not in tipo_imovel.lower():
                             continue
-                
-                # Se não achou links, processar cards
-                if not imoveis_pagina and cards:
-                    for card in cards:
-                        try:
-                            texto = card.get_text(strip=True)
-                            
-                            tipo_imovel = 'Terreno' if 'terreno' in texto.lower() else 'Casa'
-                            if tipo and tipo.lower() not in tipo_imovel.lower():
-                                continue
-                            
-                            area = 0
-                            area_match = re.search(r'(\d+[\.,]?\d*)\s*m²', texto)
-                            if area_match:
-                                area = float(area_match.group(1).replace(',', '.'))
-                            
-                            preco = 0
-                            preco_match = re.search(r'R\$\s*([\d.]+(?:,\d{2})?)', texto)
-                            if preco_match:
-                                preco = float(preco_match.group(1).replace('.', '').replace(',', '.'))
-                            
-                            if preco <= 0:
-                                continue
-                            
-                            link_elem = card.find('a', href=True)
-                            link_completo = config['url_base'] + link_elem['href'] if link_elem and link_elem['href'].startswith('/') else (link_elem['href'] if link_elem else url)
-                            
-                            preco_m2 = round(preco / area, 2) if area > 0 else 0
-                            
-                            imoveis_pagina.append({
-                                'codigo': '',
-                                'titulo': texto[:150],
-                                'tipo': tipo_imovel,
-                                'preco': preco,
-                                'area': area,
-                                'preco_m2': preco_m2,
-                                'quartos': 0,
-                                'banheiros': 0,
-                                'vagas': 0,
-                                'link': link_completo,
-                                'imobiliaria': config['nome'],
-                                'telefone': config['telefone'],
-                                'cor': config['cor']
-                            })
-                        except:
+                        
+                        # Aplicar filtros
+                        if preco > 0 and (preco < preco_min or preco > preco_max):
                             continue
-                
-                # Se ainda não achou, usar preços do texto
-                if not imoveis_pagina and precos_texto and areas_texto:
-                    for i in range(min(len(precos_texto), len(areas_texto))):
-                        try:
-                            preco = float(re.sub(r'[^\d]', '', precos_texto[i]))
-                            area = float(areas_texto[i].replace(',', '.'))
-                            
-                            if area > 0 and preco > 0:
-                                imoveis_pagina.append({
-                                    'codigo': '',
-                                    'titulo': f'Imóvel {i+1} - {config["nome"]}',
-                                    'tipo': tipo or 'Casa/Terreno',
-                                    'preco': preco,
-                                    'area': area,
-                                    'preco_m2': round(preco / area, 2),
-                                    'quartos': 0,
-                                    'banheiros': 0,
-                                    'vagas': 0,
-                                    'link': url,
-                                    'imobiliaria': config['nome'],
-                                    'telefone': config['telefone'],
-                                    'cor': config['cor']
-                                })
-                        except:
+                        if area > 0 and (area < area_min or area > area_max):
                             continue
+                        
+                        # Montar link completo
+                        link_completo = config['url_base'] + href if href.startswith('/') else href
+                        
+                        # Título limpo
+                        titulo = texto_completo.replace('\n', ' ').replace('\r', ' ')[:150]
+                        titulo = re.sub(r'\s+', ' ', titulo).strip()
+                        
+                        preco_m2 = round(preco / area, 2) if preco > 0 and area > 0 else 0
+                        
+                        imoveis_pagina.append({
+                            'codigo': href.split('/')[-1],
+                            'titulo': titulo or f'Casa - Andi Imóveis',
+                            'tipo': tipo_imovel,
+                            'preco': preco,
+                            'area': area,
+                            'preco_m2': preco_m2,
+                            'quartos': quartos,
+                            'banheiros': 0,
+                            'vagas': vagas,
+                            'link': link_completo,
+                            'imobiliaria': config['nome'],
+                            'telefone': config['telefone'],
+                            'cor': config['cor']
+                        })
+                    except Exception as e:
+                        continue
                 
-                print(f"   ✅ {len(imoveis_pagina)} imóveis nesta página")
+                print(f"   ✅ {len(imoveis_pagina)} imóveis extraídos")
                 todos_imoveis.extend(imoveis_pagina)
                 
-                # Se não encontrou nada nesta página, para paginação
-                if not imoveis_pagina and url != config['url']:
+                if not imoveis_pagina:
                     break
                     
             except Exception as e:
                 print(f"   ❌ Erro: {str(e)[:100]}")
-                if url != config['url']:
-                    break
+                break
         
         return todos_imoveis
+    
+    def buscar_site_generico(self, config, tipo=None, preco_min=0, preco_max=999999999, area_min=0, area_max=999999):
+        """Busca genérica para outros sites"""
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'pt-BR,pt;q=0.9',
+        }
+        
+        try:
+            response = requests.get(config['url'], headers=headers, timeout=20)
+            if response.status_code != 200:
+                return []
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            links = soup.find_all('a', href=re.compile(r'/imovel|/Imovel|/imoveis', re.I))
+            cards = soup.find_all(['div', 'article', 'li'], class_=re.compile(r'card|imovel|property|listing|item|resultado', re.I))
+            texto_completo = soup.get_text()
+            precos_texto = re.findall(r'R\$\s*[\d.,]+', texto_completo)
+            areas_texto = re.findall(r'(\d+[\.,]?\d*)\s*m²', texto_completo)
+            
+            imoveis = []
+            
+            for link in links:
+                try:
+                    href = link.get('href', '')
+                    texto = link.get_text(strip=True)
+                    if len(texto) < 10:
+                        pai = link.find_parent(['div', 'article', 'li'])
+                        if pai:
+                            texto = pai.get_text(strip=True)
+                    
+                    tipo_imovel = 'Terreno' if 'terreno' in href.lower() + texto.lower() else 'Casa'
+                    if tipo and tipo.lower() not in tipo_imovel.lower():
+                        continue
+                    
+                    area = 0
+                    m = re.search(r'(\d+[\.,]?\d*)\s*m²', texto)
+                    if m: area = float(m.group(1).replace(',', '.'))
+                    
+                    preco = 0
+                    m = re.search(r'R\$\s*([\d.]+(?:,\d{2})?)', texto)
+                    if m: preco = float(m.group(1).replace('.', '').replace(',', '.'))
+                    
+                    if 'aluguel' in texto.lower() and 'venda' not in texto.lower():
+                        continue
+                    if preco > 0 and (preco < preco_min or preco > preco_max):
+                        continue
+                    if area > 0 and (area < area_min or area > area_max):
+                        continue
+                    
+                    link_completo = config['url_base'] + href if href.startswith('/') else href
+                    preco_m2 = round(preco/area, 2) if preco > 0 and area > 0 else 0
+                    
+                    imoveis.append({
+                        'codigo': '', 'titulo': texto[:150], 'tipo': tipo_imovel,
+                        'preco': preco, 'area': area, 'preco_m2': preco_m2,
+                        'link': link_completo, 'imobiliaria': config['nome'],
+                        'telefone': config['telefone'], 'cor': config['cor']
+                    })
+                except: continue
+            
+            return imoveis
+        except:
+            return []
     
     def buscar(self, imob='todas', tipo=None, pmin=0, pmax=999999999, amin=0, amax=999999):
         """Busca em uma ou todas as imobiliárias"""
         todos = []
+        
         for key, cfg in self.imobiliarias.items():
             if imob == 'todas' or imob == key:
                 print(f"\n🔍 Buscando: {cfg['nome']}...")
-                imoveis = self.buscar_site(cfg, tipo, pmin, pmax, amin, amax)
+                
+                if key == 'andi':
+                    imoveis = self.buscar_andi(cfg, tipo, pmin, pmax, amin, amax)
+                else:
+                    imoveis = self.buscar_site_generico(cfg, tipo, pmin, pmax, amin, amax)
+                
                 todos.extend(imoveis)
                 print(f"   {cfg['nome']}: {len(imoveis)} imóveis")
         
@@ -336,7 +333,7 @@ def index():
         .field{margin-bottom:10px}
         .field label{display:block;color:#8b949e;margin-bottom:5px;font-size:.85em}
         .field input,.field select{width:100%;padding:10px;border:1px solid #30363d;border-radius:8px;background:#0d1117;color:#c9d1d9;font-size:.95em}
-        .btn{display:block;width:100%;padding:14px;background:#238636;color:#fff;border:none;border-radius:8px;font-size:1em;cursor:pointer;font-weight:bold;margin-top:15px;transition:.2s}
+        .btn{display:block;width:100%;padding:14px;background:#238636;color:#fff;border:none;border-radius:8px;font-size:1em;cursor:pointer;font-weight:bold;margin-top:15px}
         .btn:hover{background:#2ea043}
         .loading{display:none;text-align:center;padding:25px;color:#58a6ff}
         .loading.show{display:block}
@@ -351,7 +348,6 @@ def index():
         td{padding:8px 10px;border-bottom:1px solid #21262d}
         tr:hover{background:#1a1f2b}
         .link{color:#58a6ff;text-decoration:none}
-        .link:hover{text-decoration:underline}
         .tipo-casa{color:#3fb950}.tipo-terreno{color:#d2991d}
         .guia{background:#0d1117;border:1px solid #238636;border-radius:10px;padding:15px;margin-top:15px}
         .guia h3{color:#3fb950;margin-bottom:10px}
@@ -371,7 +367,7 @@ def index():
                 <span class="badge" style="background:rgba(156,39,176,0.15);color:#bc8cff">Corretor e Cia</span>
                 <span class="badge" style="background:rgba(255,87,34,0.15);color:#f78166">Sauthier</span>
                 <span class="badge" style="background:rgba(0,188,212,0.15);color:#00BCD4">Imob. Sapucaia</span>
-                <span class="badge" style="background:rgba(233,30,99,0.15);color:#E91E63">Andi Imóveis</span>
+                <span class="badge" style="background:rgba(233,30,99,0.15);color:#E91E63">Andi Imoveis</span>
             </div>
         </div>
         
@@ -381,57 +377,30 @@ def index():
                 <div class="field">
                     <label>Imobiliaria</label>
                     <select id="imob">
-                        <option value="todas">TODAS (5 imobiliarias)</option>
+                        <option value="todas">TODAS (5)</option>
                         <option value="besser">Besser</option>
                         <option value="corretorcia">Corretor e Cia</option>
                         <option value="sauthier">Sauthier</option>
                         <option value="sapucaia">Imob. Sapucaia</option>
-                        <option value="andi">Andi Imóveis</option>
+                        <option value="andi">Andi Imoveis</option>
                     </select>
                 </div>
-                <div class="field">
-                    <label>Tipo</label>
-                    <select id="tipo">
-                        <option value="">Todos</option>
-                        <option value="Casa">Casas</option>
-                        <option value="Terreno">Terrenos</option>
-                    </select>
-                </div>
-                <div class="field">
-                    <label>Preco Min (R$)</label>
-                    <input type="number" id="pmin" placeholder="150000">
-                </div>
-                <div class="field">
-                    <label>Preco Max (R$)</label>
-                    <input type="number" id="pmax" placeholder="600000">
-                </div>
-                <div class="field">
-                    <label>Area Min (m²)</label>
-                    <input type="number" id="amin" placeholder="50">
-                </div>
-                <div class="field">
-                    <label>Area Max (m²)</label>
-                    <input type="number" id="amax" placeholder="300">
-                </div>
+                <div class="field"><label>Tipo</label><select id="tipo"><option value="">Todos</option><option value="Casa">Casas</option><option value="Terreno">Terrenos</option></select></div>
+                <div class="field"><label>Preco Min</label><input type="number" id="pmin" placeholder="150000"></div>
+                <div class="field"><label>Preco Max</label><input type="number" id="pmax" placeholder="600000"></div>
+                <div class="field"><label>Area Min</label><input type="number" id="amin" placeholder="50"></div>
+                <div class="field"><label>Area Max</label><input type="number" id="amax" placeholder="300"></div>
             </div>
             <button class="btn" onclick="buscar()">Buscar Imoveis</button>
         </div>
-        
-        <div class="loading" id="loading">
-            <div class="spinner"></div>
-            <p>Buscando imoveis nas 5 imobiliarias...</p>
-        </div>
-        
+        <div class="loading" id="loading"><div class="spinner"></div><p>Buscando...</p></div>
         <div id="resultados"></div>
     </div>
-    
     <script>
         function fmoney(v){return v>0?'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2}):'N/D'}
-        
         async function buscar(){
             document.getElementById('loading').classList.add('show');
             document.getElementById('resultados').innerHTML='';
-            
             const p=new URLSearchParams({
                 imob:document.getElementById('imob').value,
                 tipo:document.getElementById('tipo').value,
@@ -440,56 +409,26 @@ def index():
                 amin:document.getElementById('amin').value||0,
                 amax:document.getElementById('amax').value||999999
             });
-            
             try{
-                const r=await fetch('/buscar?'+p);
-                const d=await r.json();
-                mostrar(d);
+                const r=await fetch('/buscar?'+p);const d=await r.json();mostrar(d);
             }catch(e){
                 document.getElementById('resultados').innerHTML='<div class="card"><p style="color:#f85149">Erro: '+e.message+'</p></div>';
-            }finally{
-                document.getElementById('loading').classList.remove('show');
-            }
+            }finally{document.getElementById('loading').classList.remove('show')}
         }
-        
         function mostrar(d){
-            if(!d.analise||d.analise.total===0){
-                document.getElementById('resultados').innerHTML='<div class="card"><p>Nenhum imovel encontrado.</p></div>';
-                return;
-            }
-            const a=d.analise;
-            
-            let h='<div class="card"><h2>Analise</h2><div class="stats">';
+            if(!d.analise||d.analise.total===0){document.getElementById('resultados').innerHTML='<div class="card"><p>Nenhum imovel.</p></div>';return}
+            const a=d.analise;let h='<div class="card"><h2>Analise</h2><div class="stats">';
             h+=`<div class="stat"><div class="val">${a.total}</div><div class="lbl">Total</div></div>`;
             h+=`<div class="stat"><div class="val">R$ ${a.mediana.toLocaleString('pt-BR')}</div><div class="lbl">Mediana/m²</div></div>`;
-            h+=`<div class="stat"><div class="val">R$ ${a.q1.toLocaleString('pt-BR')}</div><div class="lbl">Q1 (25%)</div></div>`;
-            h+=`<div class="stat"><div class="val">R$ ${a.q3.toLocaleString('pt-BR')}</div><div class="lbl">Q3 (75%)</div></div>`;
-            h+=`<div class="stat"><div class="val">R$ ${a.minimo.toLocaleString('pt-BR')}</div><div class="lbl">Minimo</div></div>`;
-            h+=`<div class="stat"><div class="val">R$ ${a.maximo.toLocaleString('pt-BR')}</div><div class="lbl">Maximo</div></div>`;
+            h+=`<div class="stat"><div class="val">R$ ${a.q1.toLocaleString('pt-BR')}</div><div class="lbl">Q1</div></div>`;
+            h+=`<div class="stat"><div class="val">R$ ${a.q3.toLocaleString('pt-BR')}</div><div class="lbl">Q3</div></div>`;
             h+='</div>';
-            
-            if(a.por_imobiliaria){
-                h+='<div class="stats">';
-                for(const[im,dados]of Object.entries(a.por_imobiliaria)){
-                    h+=`<div class="stat" style="border-left:3px solid ${dados.cor}"><div class="val" style="color:${dados.cor}">${dados.total}</div><div class="lbl">${im}</div><div class="lbl">Med: R$ ${dados.mediana.toLocaleString('pt-BR')}/m²</div></div>`;
-                }
-                h+='</div>';
-            }
-            
-            h+=`<div class="guia"><h3>Guia de Precificacao (mediana: R$ ${a.mediana.toLocaleString('pt-BR')}/m²)</h3><div class="guia-grid">`;
-            [50,100,150,200].forEach(m2=>{
-                h+=`<div class="guia-item"><div class="area">${m2} m²</div><div class="preco">${fmoney(m2*a.mediana)}</div></div>`;
-            });
-            h+='</div></div></div>';
-            
-            h+='<div class="card"><h2>Imoveis</h2><table><thead><tr><th>#</th><th>Tipo</th><th>Imobiliaria</th><th>Preco</th><th>Area</th><th>/m²</th><th>Link</th></tr></thead><tbody>';
-            
-            d.imoveis.forEach((im,i)=>{
-                h+=`<tr><td>${i+1}</td><td class="${im.tipo==='Casa'?'tipo-casa':'tipo-terreno'}">${im.tipo}</td><td style="color:${im.cor}">${im.imobiliaria}</td><td>${fmoney(im.preco)}</td><td>${im.area>0?im.area.toFixed(1)+'m²':'N/D'}</td><td><strong>${im.preco_m2>0?'R$ '+im.preco_m2.toLocaleString('pt-BR'):'N/D'}</strong></td><td><a href="${im.link}" target="_blank" class="link">Ver</a></td></tr>`;
-            });
-            
-            h+='</tbody></table></div>';
-            document.getElementById('resultados').innerHTML=h;
+            if(a.por_imobiliaria){h+='<div class="stats">';for(const[im,d]of Object.entries(a.por_imobiliaria)){h+=`<div class="stat" style="border-left:3px solid ${d.cor}"><div class="val" style="color:${d.cor}">${d.total}</div><div class="lbl">${im}</div></div>`}h+='</div>'}
+            h+=`<div class="guia"><h3>Guia (R$ ${a.mediana.toLocaleString('pt-BR')}/m²)</h3><div class="guia-grid">`;
+            [50,100,150,200].forEach(m=>{h+=`<div class="guia-item"><div class="area">${m}m²</div><div class="preco">${fmoney(m*a.mediana)}</div></div>`});
+            h+='</div></div></div><div class="card"><h2>Imoveis</h2><table><thead><tr><th>#</th><th>Tipo</th><th>Imobiliaria</th><th>Preco</th><th>Area</th><th>/m²</th><th>Link</th></tr></thead><tbody>';
+            d.imoveis.forEach((im,i)=>{h+=`<tr><td>${i+1}</td><td class="${im.tipo==='Casa'?'tipo-casa':'tipo-terreno'}">${im.tipo}</td><td style="color:${im.cor}">${im.imobiliaria}</td><td>${fmoney(im.preco)}</td><td>${im.area>0?im.area.toFixed(1)+'m²':'N/D'}</td><td><strong>${im.preco_m2>0?'R$ '+im.preco_m2.toLocaleString('pt-BR'):'N/D'}</strong></td><td><a href="${im.link}" target="_blank" class="link">Ver</a></td></tr>`});
+            h+='</tbody></table></div>';document.getElementById('resultados').innerHTML=h
         }
     </script>
 </body>
@@ -505,7 +444,6 @@ def buscar():
     amax = float(request.args.get('amax', 999999))
     
     imoveis, analise = precificador.buscar(imob, tipo if tipo else None, pmin, pmax, amin, amax)
-    
     return jsonify({'imoveis': imoveis, 'analise': analise})
 
 if __name__ == '__main__':
